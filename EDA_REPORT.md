@@ -40,13 +40,13 @@
 
 ## 5 男胎 EDA
 
-### 4.1 Y 浓度与 4% 阈值
+### 5.1 Y 浓度与 4% 阈值
 
 男胎 Y 浓度观测范围为 0.0100–0.2342。按 Y≥0.04 定义，1082 条记录中 937 条达标（86.6%），145 条未达标。该比例是记录层面比例，不是孕妇层面比例。
 
 [04_y_distribution_threshold.png](outputs/figures/04_y_distribution_threshold.png)
 
-### 4.2 Y 浓度与连续孕周
+### 5.2 Y 浓度与连续孕周
 
 记录层面 Spearman ρ=0.084，普通 P=0.006，n=1082 records。该普通 P 把每条记录视作行级观测，不能当作独立孕妇显著性检验依据。
 
@@ -54,13 +54,13 @@
 
 因此，当前样本只能表述为记录层面与孕周存在正向单调关联，cluster bootstrap 给出了受试者内相关下的不确定性；总体相关系数和个体内纵向方向不是同一个统计量。[05_y_vs_week.png](outputs/figures/05_y_vs_week.png)
 
-### 4.3 Y 浓度与 BMI
+### 5.3 Y 浓度与 BMI
 
 Y 与检测时 BMI（measurement-time BMI）的记录层面 Spearman ρ=-0.155，普通 P=<0.001，n=1082 records。按孕妇整簇重采样后，95% CI 为 [-0.254, -0.049]。
 
 控制连续孕周后的部分 Spearman 点估计为 -0.169，cluster bootstrap 95% CI 为 [-0.270, -0.061]。这些结果是描述性关联，不能解释为 BMI 导致 Y 浓度变化。[06_y_vs_measurement_bmi.png](outputs/figures/06_y_vs_measurement_bmi.png)
 
-### 4.4 孕周 × baseline BMI
+### 5.4 孕周 × baseline BMI
 
 BMI 分组严格按孕妇级 baseline BMI：先取每名孕妇最早连续孕周的 BMI_calc；若最早孕周有多条记录则取其中位数，再传播到该孕妇的所有记录。当前采用“等频分组”，每个组的孕妇人数和记录数见 [bmi_group_definitions.csv](outputs/tables/bmi_group_definitions.csv)。分组只用于 EDA，不代表问题二最终最优 BMI 分组。
 
@@ -76,13 +76,13 @@ BMI 组与首次观测达标的描述如下：
 - 等频组4（32.2–33.9）：53 名孕妇，观察到达标 51 名（96.2%）；首次观测达标孕周中位数 12.71 周，未观测达标比例 3.8%。
 - 等频组5（33.9–46.9）：54 名孕妇，观察到达标 51 名（94.4%）；首次观测达标孕周中位数 13.29 周，未观测达标比例 5.6%。
 
-### 4.5 重复测量与个体内方向
+### 5.5 重复测量与个体内方向
 
-在至少两条记录的男胎孕妇中，个体内 Y 标准差中位数为 0.0121，个体内极差中位数为 0.0276。按每名孕妇内部 Y—孕周简单线性斜率统计：正斜率 227 人（87.3%），负斜率 33 人（12.7%），0附近斜率 17 人（6.5%）。0附近定义为斜率绝对值不超过 0.0005。斜率只是个体内描述，不是最终线性模型。
+在至少两条记录的男胎孕妇中，个体内 Y 标准差中位数为 0.0121，个体内极差中位数为 0.0276。按每名孕妇内部 Y—孕周简单线性斜率统计：正斜率 227 人（87.3%），负斜率 33 人（12.7%）；其中 17 人（6.5%）的绝对斜率不超过 0.0005。0附近是与正、负斜率重叠的辅助标志，不是第三个互斥类别。斜率只是个体内描述，不是最终线性模型。
 
 [09_repeated_measurement_trajectory.png](outputs/figures/09_repeated_measurement_trajectory.png) 展示记录次数较多孕妇的轨迹；[13_male_subject_slope_distribution.png](outputs/figures/13_male_subject_slope_distribution.png) 展示斜率分布。近似同孕周重复对另存于 [near_week_repeat_pairs.csv](outputs/tables/near_week_repeat_pairs.csv)，不与同次采血重复检测混用。
 
-### 4.6 阈值观测与删失
+### 5.6 阈值观测与删失
 
 “首次观测达标孕周”只表示第一次观测到 Y≥4%，不是无删失的真实跨阈值时刻。每名男胎孕妇恰好一行的阈值表见 [male_threshold_censoring.csv](outputs/tables/male_threshold_censoring.csv)，类型统计见 [threshold_censoring_summary.csv](outputs/tables/threshold_censoring_summary.csv)。
 
@@ -95,13 +95,13 @@ BMI 组与首次观测达标的描述如下：
 
 [10_first_observed_pass_week_distribution.png](outputs/figures/10_first_observed_pass_week_distribution.png)；[11_first_observed_pass_week_vs_baseline_bmi.png](outputs/figures/11_first_observed_pass_week_vs_baseline_bmi.png)；[14_male_threshold_censoring_types.png](outputs/figures/14_male_threshold_censoring_types.png)。
 
-### 4.7 同次采血重复检测误差
+### 5.7 同次采血重复检测误差
 
 男胎同次采血重复检测单独按孕妇代码和检测抽血次数分组，共 40 个重复组、82 个重复对。Y 绝对差中位数为 0.004873，95 百分位数为 0.016027；相对差中位数为 9.7%，95 百分位数为 41.0%。差值和 Bland–Altman 描述性界限见 [male_same_draw_repeat_error_summary.csv](outputs/tables/male_same_draw_repeat_error_summary.csv)。
 
 A/B 按序号确定性排序；同一次采血没有天然先后测量方向，差值符号只作描述，绝对差更加直接。不要把这部分与近似同孕周重复对混为一谈。[15_male_same_draw_repeat_error.png](outputs/figures/15_male_same_draw_repeat_error.png)
 
-### 4.8 测序质量与 Y
+### 5.8 测序质量与 Y
 
 与 Y 浓度绝对值关联最大的质量变量是 比对比例，记录层面 Spearman ρ=-0.159，普通探索性 P=<0.001，n=1082 records。完整表见 [quality_vs_y_summary.csv](outputs/tables/quality_vs_y_summary.csv)，图见 [16_quality_vs_y.png](outputs/figures/16_quality_vs_y.png)。
 
@@ -120,23 +120,23 @@ A/B 按序号确定性排序；同一次采血没有天然先后测量方向，�
 
 ## 6 女胎 EDA
 
-### 5.1 记录级异常分布
+### 6.1 记录级异常分布
 
 女胎共有 605 条 records，其中任意异常 67 条（11.1%），正常 538 条。该比例是异常记录比例。[17_female_abnormal_distribution.png](outputs/figures/17_female_abnormal_distribution.png)
 
 记录级类型统计见 [female_abnormal_counts.csv](outputs/tables/female_abnormal_counts.csv)：正常 538 条；T13 10 条；T18 33 条；T21 9 条；复合异常 15 条。
 
-### 5.2 孕妇级异常分布
+### 6.2 孕妇级异常分布
 
-147 名孕妇中，孕妇级统计为：任意异常 44 名（29.9%）；T13 18 名（12.2%）；T18 30 名（20.4%）；T21 12 名（8.2%）；复合异常 12 名（8.2%）。孕妇级结果见 [female_subject_abnormal_summary.csv](outputs/tables/female_subject_abnormal_summary.csv) 和 [female_subject_abnormal_counts.csv](outputs/tables/female_subject_abnormal_counts.csv)。
+147 名孕妇中，孕妇级统计为：曾至少一次出现异常标记的孕妇 44 名（29.9%）；曾至少一次出现T13标记的孕妇 18 名（12.2%）；曾至少一次出现T18标记的孕妇 30 名（20.4%）；曾至少一次出现T21标记的孕妇 12 名（8.2%）；曾至少一次出现复合异常标记的孕妇 12 名（8.2%）。孕妇级结果见 [female_subject_abnormal_summary.csv](outputs/tables/female_subject_abnormal_summary.csv) 和 [female_subject_abnormal_counts.csv](outputs/tables/female_subject_abnormal_counts.csv)。
 
-记录级异常数与孕妇级异常数不能互相替代；同一孕妇只要任一检测记录出现对应标志，孕妇级标志就记为1。记录级任意异常为 67 条，孕妇级任意异常为 44 名（29.9%）。
+记录级异常数与孕妇级异常数不能互相替代；同一孕妇只要任一检测记录出现对应标志，孕妇级标志就记为1。记录级任意异常标记为 67 条；孕妇级则是 44 名孕妇曾至少一次出现异常标记（29.9%），不应直接解释为最终真实异常患病率。
 
-### 5.3 同一孕妇标签一致性
+### 6.3 同一孕妇标签一致性
 
 标签一致性按每名孕妇的异常类型集合审计，不决定哪个检测标签是真值。共 43 名孕妇（29.3%）存在不同记录标签，细节见 [female_within_subject_label_consistency.csv](outputs/tables/female_within_subject_label_consistency.csv)，汇总见 [female_within_subject_label_consistency_summary.csv](outputs/tables/female_within_subject_label_consistency_summary.csv)。
 
-### 5.4 Z13、Z18、Z21 的两种合法描述
+### 6.4 Z13、Z18、Z21 的两种合法描述
 
 对于每个对应异常，均同时给出原始方向 Z 的 AUC 和绝对值 Z 的 AUC；二者不择一。P 值是记录层面探索性 Mann–Whitney U P 值，存在重复测量，不能解释成独立孕妇检验。
 
@@ -148,7 +148,7 @@ A/B 按序号确定性排序；同一次采血没有天然先后测量方向，�
 
 X 染色体 Z 值与任意异常的辅助图见 [21_zx_vs_abnormal.png](outputs/figures/21_zx_vs_abnormal.png)。完整新版结果见 [female_zscore_discrimination_summary.csv](outputs/tables/female_zscore_discrimination_summary.csv)。
 
-### 5.5 孕妇级 Z 值辅助描述与其他特征
+### 6.5 孕妇级 Z 值辅助描述与其他特征
 
 每名女胎孕妇的 max_abs_Z13、max_abs_Z18、max_abs_Z21、max_abs_ZX 和对应中位数见 [female_subject_z_summary.csv](outputs/tables/female_subject_z_summary.csv)。这只是孕妇级描述性聚合，不是最终分类器表现。
 
