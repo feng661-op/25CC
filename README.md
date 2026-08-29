@@ -1,16 +1,10 @@
 # 2025 年全国大学生数学建模竞赛 C 题：NIPT 数据预处理与 EDA
 
-本目录只负责原始数据审计、可追溯清洗、特征整理、探索性数据分析和可视化，不替代后续四问的最终建模。
+本目录只负责原始数据审计、可追溯预处理、数据质量检查、特征整理、重复测量描述、检测误差描述、探索性分析和可视化，不替代问题一至问题四的最终建模。
 
 ## 数据来源
 
-仓库同步后已包含 `2025C原题/附件.xlsx`，这是 2025 年 C 题附件原始文件。脚本优先读取这份仓库内原始附件；`data/raw/附件.xlsx` 是同步前按同一公开来源下载的镜像，二者 SHA-256 一致。
-
-公开来源：
-
-<https://github.com/luluzzy/CUMCM2025-C-Problem/blob/main/files/%E9%99%84%E4%BB%B6.xlsx>
-
-原始附件包含男胎检测数据和女胎检测数据两张工作表。本项目不把其他仓库已经清洗好的 CSV 当作最终数据；所有处理均由 `src/preprocess.py` 从该 Excel 重新生成。来源选择和文件哈希会写入 `outputs/tables/data_manifest.csv`。
+仓库内的 2025C原题/附件.xlsx 是分析使用的原始附件；data/raw/附件.xlsx 是同 SHA-256 的镜像。来源、工作表、文件哈希和记录数会写入 outputs/tables/data_manifest.csv。原始附件不会被脚本改写。
 
 ## 运行方法
 
@@ -19,26 +13,43 @@
 ```bash
 python src/preprocess.py
 python src/eda.py
+python -m py_compile src/preprocess.py src/eda.py
 ```
 
-需要的 Python 包见 `requirements.txt`。脚本使用相对路径，Windows、macOS 和 Linux 均可运行。
+依赖版本要求见 requirements.txt，本次实际运行环境见 outputs/tables/runtime_environment.txt。脚本使用仓库相对路径，重复运行会覆盖同名产物，不会追加重复记录。
 
-## 输出内容
+## 目录结构
 
-- `data/processed/`：保留原始字段并追加分析字段的男胎、女胎数据；不直接删除异常值。
-- `outputs/tables/`：缺失审计、数值描述统计、重复检测、首次达标孕周、相关性和分组统计表。
-- `outputs/figures/`：统一风格、中文标注、300 dpi 的 EDA 图表。
-- `EDA_REPORT.md`：自动读取实际输出数字生成的中文报告。
+- 2025C原题/：原始题目附件。
+- data/raw/：原始附件镜像。
+- data/processed/：保留原始字段并追加分析字段的男胎、女胎记录表和孕妇汇总表。
+- outputs/tables/：质量审计、描述统计、聚类 bootstrap、BMI 分组、阈值删失、重复检测误差和女胎孕妇级汇总。
+- outputs/figures/：连续唯一编号、中文标注、300 dpi 的 PNG 图表。
+- EDA_REPORT.md：由脚本根据实际表格数字自动生成的 EDA 报告。
 
-## 关键处理原则
+## 重要处理原则
 
-1. 只去除列名前后空格，原始字段和值保留；分析字段另行追加。
-2. 孕周统一换算为连续周数，例如 `11w+6 = 11 + 6/7`，原始孕周仍保留。
-3. BMI 用身高和体重重新计算，并保留原始 BMI、计算 BMI 和差值。
-4. 男胎以 Y 染色体浓度 `0.04`（4%）生成达标标志；女胎 Y 相关空白按生理机制记为结构性缺失，不填 0、不均值填补。
-5. 异常类型同时保留复合异常，并拆分 T13、T18、T21 指示变量。
-6. 同一孕妇的多次记录全部保留，并追加记录数、孕周数、同次采血记录数和重复测量标志。
-7. GC、BMI、孕周、比例变量和其他极端值做审计与标志，不按 IQR 或 Z 分数直接删除。
-8. “胎儿是否健康”是后验结果，只用于描述和一致性检查，不进入异常预测特征。
+- 孕周按“周数 + 天数 / 7”转换为连续周数；BMI 同时保留计算值和原始差值。
+- measurement_BMI 表示每条检测记录当时的 BMI；baseline_BMI 表示该孕妇最早检测孕周内 BMI 的中位数。两者不能混用。
+- 男胎 Y≥4% 只生成记录级达标标志；女胎 Y 相关列是结构性缺失，不填 0。
+- 异常值、GC 经验范围标记和比例越界只审计或标记，不批量删除。GC 不在 0.40–0.60 内只表示范围标记，不等于测序失败。
+- 原始 Pearson、Spearman P 值只作记录层面探索描述；主要关联另给按孕妇整簇重采样的 95% 置信区间。
+- 同一孕妇的记录不是独立样本。训练、验证和交叉验证应按孕妇分组；后验健康状态不能作为异常预测输入。
 
-完整结论、限制和后续建模建议见 [EDA_REPORT.md](EDA_REPORT.md)。
+## 关键交付
+
+- cluster_bootstrap_correlations.csv：Y 与孕周、检测时 BMI 及控制孕周后的部分 Spearman 的孕妇级聚类 bootstrap 区间。
+- male_subject_slope_summary.csv：个体内 Y—孕周方向的描述性汇总。
+- male_threshold_censoring.csv：每名男胎孕妇一行的 left、interval、right 观测删失区间，并单独标记非单调轨迹。
+- threshold_censoring_by_bmi.csv：按孕妇级 baseline_BMI 汇总的阈值删失类型。
+- male_same_draw_repeat_groups.csv、male_same_draw_repeat_pairs.csv、male_same_draw_repeat_error_summary.csv：同次采血重复检测误差描述。
+- female_zscore_discrimination_summary.csv：Z13、Z18、Z21 的原始方向 AUC 与绝对值 AUC，P 值标明为记录层面探索性结果。
+- female_subject_abnormal_summary.csv、female_subject_abnormal_counts.csv、female_within_subject_label_consistency.csv、female_subject_z_summary.csv：女胎孕妇级异常、标签一致性和 Z 值辅助描述。
+- variable_dictionary.csv：关键变量定义、层级、来源、计算方式和使用边界。
+
+## 两个使用警告
+
+1. “首次观测达标孕周”不是无删失的真实阈值跨越时间；应结合阈值区间和删失类型解释。
+2. BMI 分组只用于 EDA，按孕妇级 baseline_BMI 建立，不代表问题二的最终最优分组。
+
+完整结论、限制和图表推荐见 EDA_REPORT.md。

@@ -1,0 +1,17 @@
+﻿变量名,中文定义,层级,来源,计算方式,单位,是否可用于后续模型输入,备注
+孕周_连续值,检测孕周换算后的连续周数,record,derived,周数 + 天数/7；天数必须小于7,周,是,保留原始检测孕周
+BMI_calc,按身高和体重重算的 BMI,record,derived,体重(kg)/(身高(cm)/100)^2,kg/m²,是,异常值只标记
+measurement_BMI,每条检测记录当时的 BMI,record,derived,等于 BMI_calc,kg/m²,是,用于检测时 BMI 图
+baseline_BMI,孕妇最早检测孕周对应的基线 BMI,subject,derived,最早连续孕周内 BMI_calc 的中位数，并传播到该孕妇全部记录,kg/m²,是,用于 BMI 分组与主热力图
+Y_pass,Y 浓度是否达到4%阈值,record,derived,Y染色体浓度≥0.04为1，否则为0；缺失保留缺失,0/1/缺失,可作描述或结果,女胎结构性缺失
+GC_range_flag,GC 是否不在题面经验区间内的记录标记,record,derived,GC<0.40或GC>0.60,0/1,需谨慎,不等于测序失败
+abnormal_any,记录是否含任意 T13/T18/T21 异常,record,derived,三个分项标志的最大值,0/1,可作结果,不使用后验健康状态
+abnormal_T13,记录是否含 T13 异常,record,derived,从异常文本解析 T13,0/1,可作结果,复合异常保留为1
+abnormal_T18,记录是否含 T18 异常,record,derived,从异常文本解析 T18,0/1,可作结果,复合异常保留为1
+abnormal_T21,记录是否含 T21 异常,record,derived,从异常文本解析 T21,0/1,可作结果,复合异常保留为1
+胎儿是否健康,题目提供的后验健康状态,record,raw,原始附件直接保留,分类,否,仅用于描述和一致性审计，避免信息泄漏
+首次观测达标孕周,首次有效观测到 Y≥4% 的孕周,subject,derived,按序号和孕周排序后取首次达标观测,周,需谨慎,不是无删失真实跨越时间
+threshold_lower,阈值跨越观测区间下界,subject,derived,区间删失取首次达标前最后一次未达标孕周；右删失取最后观测孕周,周,需谨慎,左删失为空
+threshold_upper,阈值跨越观测区间上界,subject,derived,左/区间删失取首次达标孕周,周,需谨慎,右删失为空
+censoring_type,阈值观测删失类型,subject,derived,left、interval、right 三类互斥规则,分类,需谨慎,非单调是独立标志
+threshold_nonmonotonic,跨过阈值后再次出现低于阈值观测,subject,derived,首次达标后是否出现 Y<0.04,0/1,需谨慎,不删除该类轨迹

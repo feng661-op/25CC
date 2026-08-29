@@ -7,7 +7,10 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.metadata as importlib_metadata
+import platform
 import re
+import sys
 from datetime import date, datetime
 from pathlib import Path
 
@@ -33,6 +36,11 @@ RATIO_COLUMNS = [
 GC_COLUMN = "GC含量"
 Y_CONCENTRATION_COLUMN = "Y染色体浓度"
 Y_Z_COLUMN = "Y染色体Z值"
+
+EXPECTED_COUNTS = {
+    "男胎": {"records": 1082, "subjects": 267},
+    "女胎": {"records": 605, "subjects": 147},
+}
 
 
 def clean_column_names(df: pd.DataFrame) -> pd.DataFrame:
@@ -96,6 +104,24 @@ def iqr_flag(series: pd.Series) -> tuple[pd.Series, float, float]:
     upper = q3 + 1.5 * iqr
     flags = ((series < lower) | (series > upper)).fillna(False).astype("boolean")
     return flags, float(lower), float(upper)
+
+
+def add_baseline_bmi(df: pd.DataFrame) -> pd.DataFrame:
+    """按每名孕妇最早连续孕周的 BMI_calc 中位数生成基线 BMI。"""
+    df = df.copy()
+    baseline = pd.Series(np.nan, index=df.index, dtype="float64")
+    for _, group in df.groupby("孕妇代码", dropna=False, sort=False):
+        weeks = numeric(group, "孕周_连续值").round(8)
+        valid_weeks = weeks.dropna()
+        if valid_weeks.empty:
+            continue
+        first_week = float(valid_weeks.min())
+        earliest = group.loc[weeks == first_week]
+        value = numeric(earliest, "BMI_calc").median()
+        if pd.notna(value):
+            baseline.loc[group.index] = float(value)
+    df["baseline_BMI"] = baseline
+    return df
 
 
 def abnormal_tokens(value: object) -> list[str]:
@@ -173,7 +199,9 @@ def add_analysis_fields(raw_df: pd.DataFrame, sex: str) -> tuple[pd.DataFrame, l
     bmi_calc = weight_kg / (height_cm / 100.0) ** 2
     bmi_calc = bmi_calc.where((height_cm > 0) & (weight_kg > 0))
     df["BMI_calc"] = bmi_calc
+    df["measurement_BMI"] = bmi_calc
     df["BMI_diff"] = bmi_original - bmi_calc
+    df = add_baseline_bmi(df)
 
     y_z = numeric(df, Y_Z_COLUMN)
     y_concentration = numeric(df, Y_CONCENTRATION_COLUMN)
@@ -191,9 +219,10 @@ def add_analysis_fields(raw_df: pd.DataFrame, sex: str) -> tuple[pd.DataFrame, l
 
     df = add_subject_fields(df, sex)
 
-    df["GC_abnormal"] = (
-        numeric(df, GC_COLUMN).notna() & ~numeric(df, GC_COLUMN).between(0.40, 0.60)
-    ).astype("boolean")
+    gc = numeric(df, GC_COLUMN)
+    df["GC_range_flag"] = (gc.notna() & ~gc.between(0.40, 0.60)).astype("boolean")
+    # 保留旧字段以兼容已有下游脚本；正式报告只使用 GC_range_flag 的含义。
+    df["GC_abnormal"] = df["GC_range_flag"]
     df["孕周异常"] = (
         (week.notna() & ~week.between(8.0, 42.0)) | (df["孕周解析失败"] == True)
     ).astype("boolean")
@@ -243,6 +272,7 @@ def make_subject_summary(df: pd.DataFrame, sex: str) -> pd.DataFrame:
             "最早孕周": float(week.min()) if week.notna().any() else np.nan,
             "最晚孕周": float(week.max()) if week.notna().any() else np.nan,
             "BMI_首次记录": first_valid(bmi),
+            "baseline_BMI": first_valid(numeric(ordered, "baseline_BMI")),
             "BMI_中位数": float(bmi.median()) if bmi.notna().any() else np.nan,
             "首次检测日期": first_valid(ordered["检测日期_日期"]),
             "异常是否存在": int(group["abnormal_any"].max()) if "abnormal_any" in group else np.nan,
@@ -377,7 +407,7 @@ def make_category_counts(df: pd.DataFrame, sex: str) -> pd.DataFrame:
         "染色体的非整倍体",
         "胎儿是否健康",
         "Y_pass",
-        "GC_abnormal",
+        "GC_range_flag",
         "是否重复测量",
     ]
     rows = []
@@ -446,7 +476,7 @@ def make_outlier_summary(df: pd.DataFrame, sex: str, bounds: dict[str, tuple[flo
         "outlier_GC": "GC含量按本数据集 IQR 的 1.5 倍规则，仅标记",
         "outlier_Y": "Y染色体浓度按本数据集 IQR 的 1.5 倍规则，仅标记",
         "outlier_reads": "原始读段数按本数据集 IQR 的 1.5 倍规则，仅标记",
-        "GC_abnormal": "GC含量不在 0.40 至 0.60 内，仅标记",
+        "GC_range_flag": "GC含量不在题面经验区间 0.40 至 0.60 内的记录标记，不等于测序失败",
         "孕周异常": "孕周解析失败或不在 8 至 42 周内，仅标记",
         "比例变量超界": "比例变量不在 0 至 1 内，仅标记",
     }
@@ -491,12 +521,14 @@ def make_quality_summary(
         "同孕妇同孕周重复对数": int(audit.loc["同孕妇同连续孕周", "重复对数"]),
         "同次采血重复组数": int(audit.loc["同次采血重复检测", "重复组数"]),
         "缺失单元格数": int(df.isna().sum().sum()),
-        "GC异常行数": int(df["GC_abnormal"].sum()),
+        "GC经验范围标记行数": int(df["GC_range_flag"].sum()),
+        "孕周解析失败行数": int(df["孕周解析失败"].sum()),
         "孕周异常行数": int(df["孕周异常"].sum()),
         "比例超界行数": int(df["比例变量超界"].sum()),
         "BMI可比较行数": int(bmi_row["可比较行数"]),
         "BMI差值绝对值中位数": float(bmi_row["BMI差值绝对值中位数"]),
         "BMI绝对差值超过0.5行数": int(bmi_row["绝对差值超过0.5行数"]),
+        "baseline_BMI缺失行数": int(df["baseline_BMI"].isna().sum()),
         "Y相关结构性缺失行数": int(df["Y相关字段_结构性缺失"].sum()),
     }
 
@@ -504,6 +536,58 @@ def make_quality_summary(
 def write_csv(frame: pd.DataFrame, filename: str) -> None:
     TABLE_DIR.mkdir(parents=True, exist_ok=True)
     frame.to_csv(TABLE_DIR / filename, index=False, encoding="utf-8-sig")
+
+
+def package_version(package_name: str) -> str:
+    try:
+        return importlib_metadata.version(package_name)
+    except importlib_metadata.PackageNotFoundError:
+        return "未安装"
+
+
+def write_runtime_environment() -> None:
+    lines = [
+        f"Python version: {sys.version.split()[0]}",
+        f"pandas version: {package_version('pandas')}",
+        f"numpy version: {package_version('numpy')}",
+        f"scipy version: {package_version('scipy')}",
+        f"statsmodels version: {package_version('statsmodels')}",
+        f"matplotlib version: {package_version('matplotlib')}",
+        f"seaborn version: {package_version('seaborn')}",
+        f"openpyxl version: {package_version('openpyxl')}",
+        f"OS/platform: {platform.platform()}",
+    ]
+    TABLE_DIR.mkdir(parents=True, exist_ok=True)
+    (TABLE_DIR / "runtime_environment.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def assert_prepared_integrity(df: pd.DataFrame, sex: str) -> None:
+    """对固定题目附件做最低限度的结构和派生字段验收。"""
+    expected = EXPECTED_COUNTS[sex]
+    assert len(df) == expected["records"], f"{sex}记录数异常：{len(df)}"
+    assert df["孕妇代码"].nunique() == expected["subjects"], f"{sex}孕妇数异常：{df['孕妇代码'].nunique()}"
+
+    y_pass = df["Y_pass"].dropna()
+    assert y_pass.isin([0, 1]).all(), "Y_pass 只能为 0、1 或缺失"
+    bmi = numeric(df, "BMI_calc")
+    assert bmi.notna().all(), f"{sex} BMI_calc 存在无法计算的记录"
+    assert bmi.between(10, 80).all(), f"{sex} BMI_calc 出现疑似身高单位错误的值"
+    assert (numeric(df, "measurement_BMI") - bmi).abs().max() < 1e-12
+
+    baseline_nunique = df.groupby("孕妇代码", dropna=False)["baseline_BMI"].nunique(dropna=True)
+    assert baseline_nunique.le(1).all(), f"{sex}存在同一孕妇多个 baseline_BMI"
+    assert df["abnormal_any"].eq(
+        df[["abnormal_T13", "abnormal_T18", "abnormal_T21"]].max(axis=1)
+    ).all(), f"{sex}异常总标志与分项标志不一致"
+
+    if sex == "男胎":
+        y = numeric(df, Y_CONCENTRATION_COLUMN)
+        assert y.notna().all(), "男胎 Y浓度核心字段存在缺失或无法转数值记录"
+        assert df["Y相关字段_结构性缺失"].eq(False).all(), "男胎不应出现 Y 相关结构性缺失"
+    else:
+        assert df[Y_CONCENTRATION_COLUMN].isna().all(), "女胎 Y浓度应为结构性缺失"
+        assert df[Y_Z_COLUMN].isna().all(), "女胎 Y染色体Z值应为结构性缺失"
+        assert df["Y相关字段_结构性缺失"].eq(True).all(), "女胎 Y相关结构性缺失标志不一致"
 
 
 def main() -> None:
@@ -524,12 +608,17 @@ def main() -> None:
     quality_summary_rows = []
     subject_tables: dict[str, pd.DataFrame] = {}
     manifest_rows = []
+    seen_sexes: set[str] = set()
 
     source_hash = hashlib.sha256(RAW_FILE.read_bytes()).hexdigest()
     for sheet_name, raw_df in sheets.items():
         normalized = clean_column_names(raw_df)
         sex = "男胎" if (MALE_SHEET_HINT in str(sheet_name) or Y_CONCENTRATION_COLUMN in normalized.columns) else "女胎"
+        if sex in seen_sexes:
+            raise ValueError(f"检测到重复的{sex}工作表：{sheet_name}")
+        seen_sexes.add(sex)
         prepared, source_columns, bounds = add_analysis_fields(normalized, sex)
+        assert_prepared_integrity(prepared, sex)
         filename = "male_cleaned.csv" if sex == "男胎" else "female_cleaned.csv"
         prepared.to_csv(PROCESSED_DIR / filename, index=False, encoding="utf-8-sig", date_format="%Y-%m-%d")
 
@@ -574,6 +663,9 @@ def main() -> None:
     write_csv(pd.concat(bmi_tables, ignore_index=True), "bmi_consistency_summary.csv")
     write_csv(pd.concat(outlier_tables, ignore_index=True), "outlier_flags_summary.csv")
     write_csv(pd.DataFrame(manifest_rows), "data_manifest.csv")
+    if seen_sexes != set(EXPECTED_COUNTS):
+        raise AssertionError(f"工作表性别集合异常：{sorted(seen_sexes)}")
+    write_runtime_environment()
 
     print("预处理完成：")
     for row in quality_summary_rows:
