@@ -1,0 +1,3 @@
+﻿数据集,工作表,原始文件,原始文件SHA256,行数,原始字段数,输出文件
+男胎,男胎检测数据,2025C原题/附件.xlsx,14827156218bd4f7e4f16db4aa6d9f757c6648379e038ae6c6b58383648614af,1082,31,data/processed/male_cleaned.csv
+女胎,女胎检测数据,2025C原题/附件.xlsx,14827156218bd4f7e4f16db4aa6d9f757c6648379e038ae6c6b58383648614af,605,31,data/processed/female_cleaned.csv
