@@ -14,9 +14,9 @@
   "selected_model": {
     "T13": "M2",
     "T18": "M2",
-    "T21": "M2"
+    "T21": "M0"
   },
-  "selection_rule": "overall PR-AUC > M0 and >= 4/5 outer-fold PR-AUC wins",
+  "selection_rule": "conservative stability rule: overall PR-AUC > M0, >= 4/5 outer-fold PR-AUC wins, and paired woman-cluster bootstrap delta PR-AUC 95% CI lower bound > 0",
   "selected_oof_metrics": {
     "T13": {
       "Sensitivity": 0.30434782608695654,
@@ -37,13 +37,13 @@
       "Brier": 0.05284354623074503
     },
     "T21": {
-      "Sensitivity": 0.15384615384615385,
-      "Precision": 0.06666666666666667,
-      "Specificity": 0.9527027027027027,
-      "F1": 0.09302325581395349,
-      "PR_AUC": 0.12886850121886959,
-      "ROC_AUC": 0.5280665280665281,
-      "Brier": 0.020973586309928235
+      "Sensitivity": 0.07692307692307693,
+      "Precision": 0.014705882352941176,
+      "Specificity": 0.8868243243243243,
+      "F1": 0.024691358024691357,
+      "PR_AUC": 0.025637236061688166,
+      "ROC_AUC": 0.4903846153846154,
+      "Brier": 0.021073446300455177
     }
   },
   "bootstrap_reps": 1000,

@@ -13,7 +13,7 @@ r"""
 5. 主优化指标为 PR-AUC，分类阈值指标报告 Sensitivity/Precision/F1/Specificity，
    辅助报告 ROC-AUC 和 Brier；
 6. 95% CI 使用孕妇整簇 cluster bootstrap，不把 605 条记录当成独立样本；
-7. Ridge 只有“总体 PR-AUC 超过 M0 且至少 4/5 个外层 fold 的 PR-AUC 更高”才允许成为最终模型；
+7. 将流程文档中的“稳定超过 baseline”保守量化为：总体 PR-AUC 超过 M0、至少 4/5 个外层 fold 的 PR-AUC 更高，且配对孕妇级 bootstrap 的 ΔPR-AUC 95% CI 下限大于 0；
 8. CV 只用于性能报告；方案确定后再用全部 605 条记录重新拟合最终判定器。
 
 运行：
@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import json
 import math
-import warnings
 from pathlib import Path
 
 import numpy as np
@@ -51,9 +50,6 @@ from sklearn.metrics import (
 )
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
-
-warnings.filterwarnings("ignore", category=UserWarning)
-warnings.filterwarnings("ignore", category=FutureWarning)
 
 # --------------------------- 配置 ---------------------------
 ROOT = Path(__file__).resolve().parents[2]
@@ -243,7 +239,7 @@ def build_ridge(C: float) -> Pipeline:
         ("imputer", SimpleImputer(strategy="median")),
         ("scaler", StandardScaler()),
         ("model", LogisticRegression(
-            penalty="l2", C=float(C), solver="lbfgs", max_iter=5000,
+            C=float(C), solver="lbfgs", max_iter=5000,
             class_weight=None,
         )),
     ])
@@ -253,7 +249,7 @@ def build_baseline_calibrator() -> Pipeline:
     # 仅用于给单 |Z| 基准提供概率/Brier；分类决策仍完全由训练折内优化的 |Z| 阈值决定。
     return Pipeline([
         ("scaler", StandardScaler()),
-        ("model", LogisticRegression(penalty="l2", C=1000.0, solver="lbfgs", max_iter=3000)),
+        ("model", LogisticRegression(C=1000.0, solver="lbfgs", max_iter=3000)),
     ])
 
 
@@ -350,6 +346,13 @@ def make_group_folds(data: pd.DataFrame, n_splits: int, seed: int, trials: int =
     return mapping, meta, fl, fn, fr
 
 
+def assert_each_fold_has_positive(fold_ids: np.ndarray, y: np.ndarray, n_splits: int, context: str):
+    """稀有标签下显式验证每个验证折都有阳性，避免指标静默退化。"""
+    for fold_id in range(n_splits):
+        if int(np.asarray(y)[np.asarray(fold_ids) == fold_id].sum()) == 0:
+            raise RuntimeError(f"{context} 的 fold {fold_id + 1} 没有阳性样本，停止运行。")
+
+
 outer_map, outer_meta, outer_woman_labels, outer_woman_n, outer_record_n = make_group_folds(
     df, OUTER_FOLDS, RANDOM_SEED
 )
@@ -400,6 +403,7 @@ for f in range(OUTER_FOLDS):
         y_all = Y[task].to_numpy(int)
         y_train = y_all[train_idx]
         y_test = y_all[test_idx]
+        assert_each_fold_has_positive(inner_fold, y_train, INNER_FOLDS, f"outer={f + 1}, task={task}, inner CV")
 
         # M0：单 |Z_k| 阈值基准。阈值只在外层 train 选。
         zname = TARGET_Z[task]
@@ -521,6 +525,42 @@ for task in TARGETS:
             })
 f2_sensitivity = pd.DataFrame(f2_rows)
 
+# 对 M1/M2 相对 M0 的 PR-AUC 增益做配对孕妇级 bootstrap。
+# 这是对流程文档“稳定超过 baseline”要求的保守量化：同一次 bootstrap 中比较两模型，保留孕妇内相关性。
+selection_group_indices = {str(g): np.asarray(idx, int) for g, idx in df.groupby(GROUP_COL).groups.items()}
+selection_women = np.array(sorted(selection_group_indices.keys()), dtype=object)
+delta_rng = np.random.default_rng(RANDOM_SEED + 18888)
+delta_store = {(task, model): [] for task in TARGETS for model in ["M1", "M2"]}
+for _ in range(BOOT_REPS):
+    sampled = delta_rng.choice(selection_women, size=len(selection_women), replace=True)
+    idx = np.concatenate([selection_group_indices[str(w)] for w in sampled])
+    for task in TARGETS:
+        yb = Y[task].to_numpy(int)[idx]
+        if int(yb.sum()) == 0:
+            continue
+        base_score = oof[("M0", task)]["rank"][idx]
+        base_ap = average_precision_score(yb, base_score)
+        for model in ["M1", "M2"]:
+            model_ap = average_precision_score(yb, oof[(model, task)]["rank"][idx])
+            delta_store[(task, model)].append(float(model_ap - base_ap))
+
+delta_rows = []
+for task in TARGETS:
+    base_pr = float(perf[(perf.task == task) & (perf.model == "M0")]["PR_AUC"].iloc[0])
+    for model in ["M1", "M2"]:
+        model_pr = float(perf[(perf.task == task) & (perf.model == model)]["PR_AUC"].iloc[0])
+        vals = np.asarray(delta_store[(task, model)], float)
+        delta_rows.append({
+            "task": task,
+            "candidate": model,
+            "delta_PR_AUC_vs_M0": model_pr - base_pr,
+            "delta_PR_AUC_CI_low": float(np.quantile(vals, 0.025)),
+            "delta_PR_AUC_CI_median": float(np.quantile(vals, 0.5)),
+            "delta_PR_AUC_CI_high": float(np.quantile(vals, 0.975)),
+            "bootstrap_reps": int(len(vals)),
+        })
+delta_ci = pd.DataFrame(delta_rows)
+
 selection_rows = []
 selected_model = {}
 for task in TARGETS:
@@ -535,13 +575,22 @@ for task in TARGETS:
             pm = float(fold_perf[(fold_perf.task == task) & (fold_perf.model == model) & (fold_perf.fold == f)]["PR_AUC"].iloc[0])
             if np.isfinite(pm) and np.isfinite(p0) and pm > p0:
                 wins += 1
-        passed = bool(model_pr > base_pr and wins >= MODEL_PASS_FOLD_WINS)
+        delta_row = delta_ci[(delta_ci.task == task) & (delta_ci.candidate == model)].iloc[0]
+        delta_low = float(delta_row["delta_PR_AUC_CI_low"])
+        delta_high = float(delta_row["delta_PR_AUC_CI_high"])
+        passed = bool(
+            model_pr > base_pr
+            and wins >= MODEL_PASS_FOLD_WINS
+            and delta_low > 0.0
+        )
         selection_rows.append({
             "task": task, "candidate": model, "PR_AUC": model_pr,
             "M0_PR_AUC": base_pr, "delta_PR_AUC_vs_M0": model_pr - base_pr,
+            "delta_PR_AUC_CI_low": delta_low,
+            "delta_PR_AUC_CI_high": delta_high,
             "outer_fold_PR_AUC_wins_vs_M0": wins,
             "required_wins": MODEL_PASS_FOLD_WINS,
-            "pass_predeclared_rule": passed,
+            "pass_stability_rule": passed,
         })
         if passed:
             candidates.append((model_pr, model))
@@ -552,6 +601,25 @@ for task in TARGETS:
         selected_model[task] = "M0"
 
 selection = pd.DataFrame(selection_rows)
+
+# 选中模型的超参数稳定性：性能方向一致不等于正则化强度/系数稳定。
+c_stability_rows = []
+for task in TARGETS:
+    model = selected_model[task]
+    if model == "M0":
+        continue
+    block = hyper_table[(hyper_table.task == task) & (hyper_table.model == model)].sort_values("outer_fold")
+    c_values = [float(v) for v in block["C"].tolist()]
+    c_stability_rows.append({
+        "task": task,
+        "model": model,
+        "outer_fold_C_values": ",".join(f"{v:g}" for v in c_values),
+        "distinct_C_count": int(len(set(c_values))),
+        "min_C": float(min(c_values)),
+        "max_C": float(max(c_values)),
+        "max_to_min_ratio": float(max(c_values) / min(c_values)),
+    })
+c_stability = pd.DataFrame(c_stability_rows)
 
 # 敏感性分析 1：X 染色体浓度是否带来增益。
 # 对 M1 去掉 CX 后重新走与主分析相同的 outer/inner 孕妇级嵌套 CV，而不是在完整数据上直接拟合比较。
@@ -566,6 +634,7 @@ def nested_ridge_oof_for_features(feats: list[str]):
         for task in TARGETS:
             y_all = Y[task].to_numpy(int)
             y_train = y_all[train_idx]
+            assert_each_fold_has_positive(inner_fold, y_train, INNER_FOLDS, f"CX sensitivity outer={f + 1}, task={task}, inner CV")
             candidates = []
             for C in C_GRID:
                 inner_prob = np.full(len(train_idx), np.nan)
@@ -659,6 +728,7 @@ def tune_full_ridge(task: str, model: str):
     feats = MODEL_FEATURES[model]
     full_map, *_ = make_group_folds(df, OUTER_FOLDS, RANDOM_SEED + 5000 + (1 if model == "M1" else 2) * 100 + list(TARGETS).index(task))
     full_fold = df[GROUP_COL].astype(str).map(full_map).to_numpy(int)
+    assert_each_fold_has_positive(full_fold, y, OUTER_FOLDS, f"full-data tuning task={task}, model={model}")
     results = []
     probs_by_c = {}
     for C in C_GRID:
@@ -875,12 +945,14 @@ fold_distribution.to_csv(OUT / "07_外层fold分布.csv", index=False, encoding=
 fold_perf.to_csv(OUT / "07b_外层fold性能.csv", index=False, encoding="utf-8-sig")
 hyper_table.to_csv(OUT / "08_外层超参数.csv", index=False, encoding="utf-8-sig")
 selection.to_csv(OUT / "10_最终模型选择.csv", index=False, encoding="utf-8-sig")
+delta_ci.to_csv(OUT / "10a_模型增益cluster_bootstrap_CI.csv", index=False, encoding="utf-8-sig")
 coef_table.to_csv(OUT / "11_最终Ridge系数.csv", index=False, encoding="utf-8-sig")
 final_pred.to_csv(OUT / "12_全数据最终判定.csv", index=False, encoding="utf-8-sig")
 final_params.to_csv(OUT / "13_最终模型参数.csv", index=False, encoding="utf-8-sig")
 f2_sensitivity.to_csv(OUT / "14_F2阈值敏感性.csv", index=False, encoding="utf-8-sig")
 x_sensitivity.to_csv(OUT / "15_X染色体浓度敏感性.csv", index=False, encoding="utf-8-sig")
 quality_sensitivity.to_csv(OUT / "16_测序质量变量敏感性.csv", index=False, encoding="utf-8-sig")
+c_stability.to_csv(OUT / "17_选中模型超参数稳定性.csv", index=False, encoding="utf-8-sig")
 
 
 # --------------------------- 9. 图 ---------------------------
@@ -956,7 +1028,13 @@ select_display = pd.DataFrame([
         "最终模型": selected_model[task],
         "OOF_PR_AUC": float(perf[(perf.task == task) & (perf.model == selected_model[task])]["PR_AUC"].iloc[0]),
         "OOF_F1": float(perf[(perf.task == task) & (perf.model == selected_model[task])]["F1"].iloc[0]),
-        "说明": "Ridge满足预设稳定增益规则" if selected_model[task] != "M0" else "Ridge未满足稳定超越M0规则，保留单Z基准",
+        "说明": (
+            "M2整体PR-AUC提高且4/5折胜出，但配对孕妇bootstrap的ΔPR-AUC 95%CI跨0；按稳定性规则保留M0"
+            if task == "T21" and selected_model[task] == "M0"
+            else "通过整体PR-AUC、4/5折方向与配对bootstrap增益CI三重稳定性规则"
+            if selected_model[task] != "M0"
+            else "复杂模型未通过三重稳定性规则，保留单Z基准"
+        ),
     }
     for task in TARGETS
 ])
@@ -1003,24 +1081,37 @@ report = f"""# 问题四分析报告：女胎 T13/T18/T21 异常综合判定
 
 随机分类器的 PR-AUC 基准约等于各任务阳性率，因此 T13/T18/T21 的 PR-AUC 应分别结合自己的 prevalence 解释，而不能拿 0.5 作为统一基线。
 
-## 5. 预先规定的模型保留规则
+## 5. 模型保留规则：对“稳定超过 baseline”的保守量化
 
-Ridge 只有同时满足以下两点才进入最终判定：
+流程文档要求复杂模型只有在严格组外验证中**稳定**超过 Z 基准才保留，并明确指出若只有部分 fold 提升、稳定性不足，应承认样本不足而不是为了论文效果强行保留复杂模型。文档没有给出一个唯一数值门槛，因此本次复核将“稳定”保守量化为同时满足三项：
 
 1. 605 条严格 OOF 预测上的整体 PR-AUC 高于 M0；
-2. 在 5 个外层测试 fold 中至少 4 个 fold 的 PR-AUC 高于 M0。
+2. 在 5 个外层测试 fold 中至少 4 个 fold 的 PR-AUC 高于 M0；
+3. 以孕妇为整簇做**配对 cluster bootstrap**，复杂模型相对 M0 的 $\\Delta PR\text{{-}}AUC$ 95% CI 下限必须大于 0。
 
-若 M1、M2 都通过，则取整体 OOF PR-AUC 更高者；若均未通过，则保留 M0，遵循模型简约原则。
+第三项不是题目附件给出的临床规则，而是本实现为落实“稳定优势”增加的保守统计门槛；它避免由少数特别好的 fold 抬高总体 PR-AUC。若 M1、M2 都通过，则取整体 OOF PR-AUC 更高者；若均未通过，则保留 M0。
 
 {md_table(select_display, ["task", "最终模型", "OOF_PR_AUC", "OOF_F1", "说明"], digits=3)}
 
-完整候选比较见 `10_最终模型选择.csv`。
+复杂模型相对 M0 的配对增益区间如下：
+
+{md_table(delta_ci, list(delta_ci.columns), digits=3)}
+
+完整候选比较见 `10_最终模型选择.csv`，配对增益区间见 `10a_模型增益cluster_bootstrap_CI.csv`。
 
 ## 6. 孕妇级 Cluster Bootstrap 95% CI
 
 置信区间以孕妇为重采样单位：每次有放回抽取 147 位孕妇，抽中某孕妇时带入她全部检测记录。共重复 {BOOT_REPS} 次。
 
 {md_table(ci_display, list(ci_display.columns), digits=3)}
+
+### 6.1 超参数稳定性限制
+
+各外层训练集独立选择 Ridge 的正则化强度。若不同 fold 的最优 C 跨越多个数量级，说明**性能方向可能相对一致，但参数与系数本身并不稳定**；因此 `11_最终Ridge系数.csv` 和系数图只能用于描述最终全数据拟合的关联方向，不能当作稳定变量重要性排序。
+
+{md_table(c_stability, list(c_stability.columns), digits=3)}
+
+T21 尤其需要谨慎：仅 13 条阳性记录，M2 虽然整体 PR-AUC 高于 M0 且 4/5 个 fold 方向更好，但其配对 $\\Delta PR\text{{-}}AUC$ 95% CI 跨过 0，且不同 fold 的效果差异很大。因此最终按简约原则保留 M0；M2 只作为“潜在增益”候选报告，不能表述为已证明稳定优势。
 
 ## 7. 敏感性分析
 
@@ -1088,12 +1179,14 @@ D:\\mypython\\python.exe 问题四\\code\\q4_pipeline.py
 8. `08_外层超参数.csv`
 9. `09_OOF预测.csv`
 10. `10_最终模型选择.csv`
-11. `11_最终Ridge系数.csv`
-12. `12_全数据最终判定.csv`
-13. `13_最终模型参数.csv`
-14. `14_F2阈值敏感性.csv`
-15. `15_X染色体浓度敏感性.csv`
-16. `16_测序质量变量敏感性.csv`
+11. `10a_模型增益cluster_bootstrap_CI.csv`
+12. `11_最终Ridge系数.csv`
+13. `12_全数据最终判定.csv`
+14. `13_最终模型参数.csv`
+15. `14_F2阈值敏感性.csv`
+16. `15_X染色体浓度敏感性.csv`
+17. `16_测序质量变量敏感性.csv`
+18. `17_选中模型超参数稳定性.csv`
 """
 (OUT / "问题四分析报告.md").write_text(report, encoding="utf-8")
 
@@ -1106,7 +1199,7 @@ summary = {
         for task in TARGETS
     },
     "selected_model": selected_model,
-    "selection_rule": f"overall PR-AUC > M0 and >= {MODEL_PASS_FOLD_WINS}/{OUTER_FOLDS} outer-fold PR-AUC wins",
+    "selection_rule": f"conservative stability rule: overall PR-AUC > M0, >= {MODEL_PASS_FOLD_WINS}/{OUTER_FOLDS} outer-fold PR-AUC wins, and paired woman-cluster bootstrap delta PR-AUC 95% CI lower bound > 0",
     "selected_oof_metrics": {
         task: {
             m: safe_float(perf[(perf.task == task) & (perf.model == selected_model[task])][m].iloc[0])
