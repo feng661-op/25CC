@@ -1,0 +1,53 @@
+{
+  "records": 605,
+  "women": 147,
+  "positive_records": {
+    "T13": 23,
+    "T18": 46,
+    "T21": 13
+  },
+  "positive_women": {
+    "T13": 18,
+    "T18": 30,
+    "T21": 12
+  },
+  "selected_model": {
+    "T13": "M2",
+    "T18": "M2",
+    "T21": "M2"
+  },
+  "selection_rule": "overall PR-AUC > M0 and >= 4/5 outer-fold PR-AUC wins",
+  "selected_oof_metrics": {
+    "T13": {
+      "Sensitivity": 0.30434782608695654,
+      "Precision": 0.2916666666666667,
+      "Specificity": 0.9707903780068728,
+      "F1": 0.2978723404255319,
+      "PR_AUC": 0.2887640865166418,
+      "ROC_AUC": 0.7107425668608994,
+      "Brier": 0.03159389777645744
+    },
+    "T18": {
+      "Sensitivity": 0.4782608695652174,
+      "Precision": 0.4230769230769231,
+      "Specificity": 0.9463327370304114,
+      "F1": 0.44897959183673475,
+      "PR_AUC": 0.4939485187446247,
+      "ROC_AUC": 0.8404371159679552,
+      "Brier": 0.05284354623074503
+    },
+    "T21": {
+      "Sensitivity": 0.15384615384615385,
+      "Precision": 0.06666666666666667,
+      "Specificity": 0.9527027027027027,
+      "F1": 0.09302325581395349,
+      "PR_AUC": 0.12886850121886959,
+      "ROC_AUC": 0.5280665280665281,
+      "Brier": 0.020973586309928235
+    }
+  },
+  "bootstrap_reps": 1000,
+  "outer_folds": 5,
+  "inner_folds": 3,
+  "random_seed": 20250903
+}
